@@ -65,9 +65,9 @@ To see a list of currently active RTMP connections, open your web browser and go
 
 `http://<your_server_address>:<http_port>/connections`
 
-Replace `<http_port>` with the HTTP port your server is configured to use (default is 8000).
+ Replace `<http_port>` with the HTTP port your server is configured to use (default is 8000).
 
-*example: http://192.168.1.1:8000/connections
+ _example: http://192.168.1.1:8000/connections_
 
 ## Common Issues and Troubleshooting
 
