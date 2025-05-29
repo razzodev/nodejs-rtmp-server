@@ -2,6 +2,7 @@ const NodeMediaServer = require('node-media-server');
 const OBSWebSocket = require('obs-websocket-js').default;
 const os = require('os');
 const express = require('express');
+const WebSocket = require('ws');
 const app = express();
 
 // Function to get local IP address dynamically
@@ -74,6 +75,49 @@ const nms = new NodeMediaServer(config);
 // In-memory storage for active streams
 const activeStreams = new Set(); // Using a Set to easily add/remove unique stream keys
 
+// Start the Express server (HTTP) and the WebSocket server
+const server = app.listen(HTTP_PORT, () => {
+  console.log(`🌐 HTTP Server listening on port ${HTTP_PORT}`);
+  console.log(`Visit http://localhost:${HTTP_PORT}/connections to see active RTMP connections (reactive).`);
+});
+
+// Create a WebSocket server instance, hooked into the Express HTTP server
+const wss = new WebSocket.Server({ server: server });
+console.log('WebSocket server created and attached to HTTP server.'); // Updated debug log
+
+// Function to broadcast the current list of active streams to all connected WebSocket clients
+function broadcastActiveStreams() {
+    const streamsList = Array.from(activeStreams);
+    // Send an object with a type and the streams list
+    const message = JSON.stringify({ type: 'streamListUpdate', streams: streamsList });
+
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(message);
+        }
+    });
+}
+
+// WebSocket connection event handler
+wss.on('connection', ws => {
+    console.log('WebSocket client connected'); // Debug log
+    // Send the current list immediately upon connection
+    broadcastActiveStreams();
+
+    ws.on('message', message => {
+        console.log(`Received WebSocket message: ${message}`);
+        // Handle any incoming messages from clients if needed
+    });
+
+    ws.on('close', () => {
+        console.log('WebSocket client disconnected');
+    });
+
+    ws.on('error', error => {
+        console.error('WebSocket error:', error);
+    });
+});
+
 // Event handlers
 nms.on('preConnect', (id, args) => {
   console.log('[NodeEvent on preConnect]', `id=${id} args=${JSON.stringify(args)}`);
@@ -97,11 +141,12 @@ nms.on('postPublish', async (id, StreamPath, args) => {
   console.log('✅ Stream started:', StreamPath);
   console.log('📺 View in OBS using: rtmp://localhost' + StreamPath);
   
-  // Add the stream key to the activeStreams set
+  // Add the stream key to the activeStreams set and broadcast update
   const streamKey = StreamPath.split('/').pop();
   if (streamKey) {
     activeStreams.add(streamKey);
     console.log(`Active streams updated: ${Array.from(activeStreams).join(', ')}`);
+    broadcastActiveStreams(); // Broadcast the update
   }
   
   // Optional: Auto-switch OBS scene when drone stream starts
@@ -119,11 +164,12 @@ nms.on('donePublish', async (id, StreamPath, args) => {
   console.log('[NodeEvent on donePublish]', `id=${id} StreamPath=${StreamPath} args=${JSON.stringify(args)}`);
   console.log('❌ Stream ended:', StreamPath);
   
-  // Remove the stream key from the activeStreams set
+  // Remove the stream key from the activeStreams set and broadcast update
   const streamKey = StreamPath.split('/').pop();
   if (streamKey) {
     activeStreams.delete(streamKey);
     console.log(`Active streams updated: ${Array.from(activeStreams).join(', ')}`);
+    broadcastActiveStreams(); // Broadcast the update
   }
   
   // Optional: Switch back to default scene when drone stream ends
@@ -137,60 +183,113 @@ nms.on('donePublish', async (id, StreamPath, args) => {
   }
 });
 
-// Define the /connections route using Express
+// Define the /connections route using Express (modify to include WebSocket client script)
 app.get('/connections', (req, res) => {
   res.setHeader('Content-Type', 'text/html');
-  let html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n    <meta charset="UTF-8">\n    <meta name="viewport" content="width=device-width, initial-scale=1.0">\n    <title>Active RTMP Connections</title>\n</head>\n<body>\n    <h1>Active RTMP Connections</h1>';
-  html += '<form id="connectionsForm">';
-  html += '<ul>';
 
-  if (activeStreams.size === 0) {
-    html += '<li>No active RTMP connections found.</li>';
-  } else {
-    for (const streamKey of activeStreams) {
-      const rtmpUrl = `rtmp://${LOCAL_IP}:${RTMP_PORT}/live/${streamKey}`; // Construct full URL
+  // Define the client-side script content as a separate string
+  const clientScript = `
+    const clientRtmpPort = ${RTMP_PORT}; // Inject server-side RTMP_PORT
+    const websocketUrl = 'ws://' + window.location.host; // Use string concatenation instead of template literal for simplicity
+    const ws = new WebSocket(websocketUrl);
+    const connectionsList = document.getElementById('connectionsList');
 
-      html += `<li>`;
-      html += `<input type="checkbox" id="stream_${streamKey}" name="stream_${streamKey}" value="${rtmpUrl}">`;
-      html += `<label for="stream_${streamKey}">${rtmpUrl}</label>`;
-      html += '</li>';
+    ws.onopen = () => {
+        console.log('WebSocket connected');
+        connectionsList.innerHTML = ''; // Clear placeholder
+    };
+
+    ws.onmessage = event => {
+        console.log('WebSocket message received:', event.data);
+        try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'streamListUpdate' && data.streams) {
+                updateConnectionsList(data.streams);
+            }
+        } catch (error) {
+            console.error('Error parsing WebSocket message:', error);
+        }
+    };
+
+    ws.onerror = error => {
+        console.error('WebSocket error:', error);
+        connectionsList.innerHTML = '<li>Error connecting to updates.</li>';
+    };
+
+    ws.onclose = () => {
+        console.log('WebSocket disconnected');
+        connectionsList.innerHTML += '<li>Disconnected from updates.</li>';
+    };
+
+    function updateConnectionsList(streams) {
+        console.log('Updating connections list with streams:', streams); // Debug log
+        connectionsList.innerHTML = ''; // Clear current list
+        if (!streams || streams.length === 0) {
+            connectionsList.innerHTML = '<li>No active RTMP connections found.</li>';
+        } else {
+            streams.forEach(streamKey => {
+                console.log('Processing streamKey:', streamKey); // Debug log for each stream key
+                const listItem = document.createElement('li');
+                // Use string concatenation for the rtmpUrl as well
+                const rtmpUrl = 'rtmp://' + window.location.hostname + ':' + clientRtmpPort + '/live/' + streamKey;
+
+                // Add checkbox and label
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = 'stream_' + streamKey;
+                checkbox.name = 'stream_' + streamKey;
+                checkbox.value = rtmpUrl;
+
+                const label = document.createElement('label');
+                label.htmlFor = 'stream_' + streamKey;
+                label.textContent = rtmpUrl;
+
+                // Restore checkbox state from localStorage
+                const isChecked = localStorage.getItem('stream_' + streamKey) === 'true';
+                checkbox.checked = isChecked;
+
+                // Add change listener to save state
+                checkbox.addEventListener('change', function() {
+                    localStorage.setItem('stream_' + streamKey, this.checked);
+                });
+
+                listItem.appendChild(checkbox);
+                listItem.appendChild(label);
+                connectionsList.appendChild(listItem);
+            });
+        }
     }
-  }
+  `;
 
-  html += '</ul>';
-  html += '</form>';
+  // Construct the main HTML string, inserting the clientScript
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Active RTMP Connections</title>
+    <style>
+        /* Basic styling for readability */
+        body { font-family: sans-serif; }
+        #connectionsList { list-style: none; padding: 0; }
+        #connectionsList li { margin-bottom: 10px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; word-break: break-all; }
+        label { margin-left: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Active RTMP Connections</h1>
+    <ul id="connectionsList"><li>Connecting to updates...</li></ul>
 
-  // Optional: Add some basic JavaScript to remember checkbox state (using localStorage)
-  html += `<script>
-    document.addEventListener('DOMContentLoaded', function() {
-      const form = document.getElementById('connectionsForm');
-      if (form) {
-        form.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
-          const streamKey = checkbox.id.replace('stream_', '');
-          const isChecked = localStorage.getItem('stream_' + streamKey) === 'true';
-          checkbox.checked = isChecked;
+    <script>${clientScript}</script>
 
-          checkbox.addEventListener('change', function() {
-            localStorage.setItem('stream_' + streamKey, this.checked);
-          });
-        });
-      }
-    });
-  </script>`;
-
-  html += '</body>\n</html>';
+</body>
+</html>`;
 
   res.send(html); // Use res.send() with Express
 });
 
 // Start the NodeMediaServer (RTMP)
 nms.run();
-
-// Start the Express server (HTTP)
-app.listen(HTTP_PORT, () => {
-  console.log(`🌐 HTTP Server listening on port ${HTTP_PORT}`);
-  console.log(`Visit http://localhost:${HTTP_PORT}/connections to see active RTMP connections.`);
-});
 
 // Connect to OBS WebSocket (optional)
 connectToOBS();
@@ -201,9 +300,9 @@ console.log(`🎬 OBS WebSocket: ws://${DOCKER_HOST_IP}:${OBS_WEBSOCKET_PORT} (a
 console.log('');
 console.log('🏠 Local Network Access:');
 console.log(`📡 RTMP: rtmp://${LOCAL_IP}:${RTMP_PORT}/live`);
-console.log(`🌐 HTTP (Connections Page): http://${LOCAL_IP}:${HTTP_PORT}/connections`);
+console.log(`🌐 HTTP (Connections Page): http://${LOCAL_IP}:${HTTP_PORT}/connections (Reactive)`);
 console.log('');
-console.log('📱 Configure your DJI drone to stream to:');
+console.log('�� Configure your DJI drone to stream to:');
 console.log(`   📍 From same network: rtmp://${LOCAL_IP}:${RTMP_PORT}/live/your_stream_key`);
 console.log(`   📍 If using Docker Desktop: rtmp://localhost:${RTMP_PORT}/live/your_stream_key`);
 console.log('');
