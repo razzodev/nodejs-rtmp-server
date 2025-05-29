@@ -1,0 +1,25 @@
+{
+    "name": "simple-rtmp-server",
+    "version": "1.0.0",
+    "description": "Simple RTMP server for receiving drone streams",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "nodemon server.js"
+    },
+    "dependencies": {
+        "node-media-server": "^2.6.4",
+        "obs-websocket-js": "^5.0.3"
+    },
+    "devDependencies": {
+        "nodemon": "^3.0.1"
+    },
+    "keywords": [
+        "rtmp",
+        "streaming",
+        "drone",
+        "obs"
+    ],
+    "author": "",
+    "license": "MIT"
+}

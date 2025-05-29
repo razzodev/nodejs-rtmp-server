@@ -13,7 +13,7 @@ List any prerequisites for the project here (e.g., Node.js version, Docker, spec
 1. Clone the repository:
 
    ```bash
-   git clone <repository_url>
+   git clone https://github.com/razzodev/nodejs-rtmp-server.git
    ```
 
 2. Install dependencies:
