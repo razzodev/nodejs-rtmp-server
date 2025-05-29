@@ -59,6 +59,15 @@ Once the server is running, you can connect an RTMP client (e.g., OBS, ffmpeg) t
 1.  **Server Address:** `rtmp://your_server_address/live` (Replace `your_server_address` with your server's IP or domain).
 2.  **Stream Key:** You may need to configure a stream key depending on your server setup.
 
+### Viewing Active Connections
+
+To see a list of currently active RTMP connections, open your web browser and go to:
+
+`http://<your_server_address>:<http_port>/connections`
+
+Replace `<http_port>` with the HTTP port your server is configured to use (default is 8000).
+
+*example: http://192.168.1.1:8000/connections
 
 ## Common Issues and Troubleshooting
 
